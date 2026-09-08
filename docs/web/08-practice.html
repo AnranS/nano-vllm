@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="zh-CN"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light"><meta name="description" content="先在 CPU 上验证真实缓存与调度代码；有 NVIDIA GPU 后，再运行完整模型。">
+<title>08 / 用小实验验证理解 · nano-vLLM 学习手册</title><link rel="stylesheet" href="style.css"><script defer src="app.js"></script></head>
+<body><a class="skip-link" href="#main">跳到正文</a>
+<div class="book"><aside class="sidebar"><a class="brand" href="index.html"><span class="brand-mark">n.</span><span>nano-vLLM<small>源码学习手册</small></span></a>
+<div class="edition">本地源码 · bb823b3</div><nav class="chapters" aria-label="学习章节"><a href="index.html" ><span>00</span>阅读路线</a><a href="01-request.html" ><span>01</span>一轮请求</a><a href="02-scheduler.html" ><span>02</span>调度与分块 Prefill</a><a href="03-kv-cache.html" ><span>03</span>KV 分页与地址映射</a><a href="04-prefix.html" ><span>04</span>前缀复用与回收</a><a href="05-attention.html" ><span>05</span>从块表到 Attention</a><a href="06-execution.html" ><span>06</span>CUDA Graph 与编译</a><a href="07-parallel.html" ><span>07</span>多 GPU 与进程通信</a><a href="08-practice.html" aria-current="page"><span>08</span>动手实验与验收</a><a href="09-reference.html" ><span>09</span>术语与功能地图</a></nav>
+<div class="sidebar-note">先读通一个请求，<br>再理解每一项优化。</div></aside>
+<main id="main" class=""><header class="page-header"><span class="eyebrow">NANO-VLLM / 从请求到 GPU</span><h1>08 / 用小实验验证理解</h1><p class="lead">先在 CPU 上验证真实缓存与调度代码；有 NVIDIA GPU 后，再运行完整模型。</p></header>
+<article>
+<h2>Mac 上也能做的三个实验</h2>
+<p>随文档附带 <code>cpu_lab.py</code>。它直接加载本仓库的 Sequence、BlockManager 和 Scheduler，通过独立的包加载方式避开 GPU 引擎入口；配置使用简单对象。模型计算由人为指定的 token 结果代替，<strong>只验证 CPU 状态与调度，不计算 K/V 向量，也不测推理性能</strong>。</p>
+<figure class="code-box"><figcaption>使用项目现有虚拟环境；需要 numpy 和 xxhash，无须 GPU 或模型权重</figcaption><pre><code>cd ~/Desktop/source_code/nano-vllm
+.venv/bin/python docs/web/cpu_lab.py</code></pre></figure>
+<div class="table-wrap"><table><thead><tr><th scope="col">实验</th><th scope="col">观察什么</th><th scope="col">预期结果</th></tr></thead><tbody><tr><td>1. 分配、共享、释放</td><td>A/B 各 600 token，前 512 相同</td><td>各需 3 块；B 直接复用 A 的前两块；共享引用数变 2；结束后回到空闲队列。</td></tr><tr><td>2. 新 token 跨块</td><td>已缓存 256，然后采样出第 257 个</td><td>下一轮分配第二块，映射到块内偏移 0。</td></tr><tr><td>3. 分块调度</td><td>A=600，B=128，每轮预算 256</td><td>三轮 Prefill 为 256 / 256 / 216；之后一轮 Decode 同时处理两个请求。</td></tr></tbody></table></div>
+<p>实验还检查“最后一个满块不直接复用”的边界。打印的块号来自该次 CPU 管理器的真实结果，和上一章任意选择的图解块号可能不同。</p>
+<h2>有 NVIDIA GPU 后跑一次最小生成</h2>
+<p>在可用 CUDA、NCCL、Triton 与 FlashAttention 的环境中，先准备本地 Qwen3-0.6B 权重。项目的 <code>example.py</code> 默认读取 <code>~/huggingface/Qwen3-0.6B/</code>，应用 chat template 后调用 <code>generate()</code>。</p>
+<figure class="code-box"><figcaption>在已配置好依赖与模型权重的 nano-vllm 项目根目录运行</figcaption><pre><code>python example.py</code></pre></figure>
+<p>第一次用 <code>tensor_parallel_size=1</code> 和 <code>enforce_eager=True</code>。先确认能生成，再逐项调整；不要同时切换模型、TP 和图模式。</p>
+<p><a class="source-link" href="source/example.html#L6">main <span>↗ L6</span></a></p>
+<h2>加观察点时，记录这几个值</h2>
+<figure class="code-box"><figcaption>分别在 schedule() 后和 postprocess() 后观察，区分两个时间点</figcaption><pre><code>seq_id, status, num_tokens, num_cached_tokens,
+num_scheduled_tokens, block_table, len(free_block_ids)</code></pre></figure>
+<p>对比 <code>num_tokens</code> 与 <code>num_cached_tokens</code>，找到“采样已完成、KV 尚未计算”的时刻；对比引用计数与空闲队列，找到“请求结束、池依然占用显存”的原因。</p>
+<h2>读完能回答这五个问题就够了</h2>
+<details class="checkpoint"><summary>自检 · 为什么 Prefill 可以一次处理很多 token，Decode 通常每个请求只处理一个？</summary><div><p>Prompt token 已全部给定，可以使用因果掩码并行计算；普通自回归 Decode 要等当前预测结果出来，才能确定下一个输入。这里不包含投机解码。</p></div></details>
+<details class="checkpoint"><summary>自检 · 块表为什么能让请求的 KV 不连续？</summary><div><p>逻辑顺序由请求的 block_table 决定。Attention 用逻辑块索引查实际块号，再加块内偏移；不要求相邻逻辑块在池里相邻。</p></div></details>
+<details class="checkpoint"><summary>自检 · Prefill 分块是否自动减少已经预留的 Prompt KV 容量？</summary><div><p>这个版本没有按 Prefill 切块逐块预留整个 Prompt；首次 allocate() 就为当前 Prompt 的全部逻辑块建立映射。分块主要限制每轮执行的 token 数。</p></div></details>
+<details class="checkpoint"><summary>自检 · 公共前缀会不会每次复制一份 KV？</summary><div><p>命中后，块表直接引用同一缓存块并增加引用计数。其余未命中部分单独分配。</p></div></details>
+<details class="checkpoint"><summary>自检 · Python 调度变快，是否必然同等比例加速推理？</summary><div><p>不会。整体收益取决于 CPU 调度是否限制 GPU 工作，以及计算、显存读写、通信各占多少时间。先定位瓶颈，再判断优化对象。</p></div></details>
+</article><nav class="pager" aria-label="章节翻页"><a href="07-parallel.html"><small>上一章</small>← 多 GPU 与进程通信</a><a href="09-reference.html"><small>下一章</small>术语与功能地图 →</a></nav><footer>依据本地工作区生成 · bb823b3e0698 · <a href="source/manifest.json">源码版本清单</a> · <a href="source/LICENSE.txt">源码 MIT 许可</a></footer></main></div></body></html>

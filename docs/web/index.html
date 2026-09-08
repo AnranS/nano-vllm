@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="zh-CN"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light"><meta name="description" content="先串起单 GPU 的一次生成，再逐步补上缓存、调度与执行优化。每章只解决一个问题。">
+<title>从一个请求读懂 nano-vLLM · nano-vLLM 学习手册</title><link rel="stylesheet" href="style.css"><script defer src="app.js"></script></head>
+<body><a class="skip-link" href="#main">跳到正文</a>
+<div class="book"><aside class="sidebar"><a class="brand" href="index.html"><span class="brand-mark">n.</span><span>nano-vLLM<small>源码学习手册</small></span></a>
+<div class="edition">本地源码 · bb823b3</div><nav class="chapters" aria-label="学习章节"><a href="index.html" aria-current="page"><span>00</span>阅读路线</a><a href="01-request.html" ><span>01</span>一轮请求</a><a href="02-scheduler.html" ><span>02</span>调度与分块 Prefill</a><a href="03-kv-cache.html" ><span>03</span>KV 分页与地址映射</a><a href="04-prefix.html" ><span>04</span>前缀复用与回收</a><a href="05-attention.html" ><span>05</span>从块表到 Attention</a><a href="06-execution.html" ><span>06</span>CUDA Graph 与编译</a><a href="07-parallel.html" ><span>07</span>多 GPU 与进程通信</a><a href="08-practice.html" ><span>08</span>动手实验与验收</a><a href="09-reference.html" ><span>09</span>术语与功能地图</a></nav>
+<div class="sidebar-note">先读通一个请求，<br>再理解每一项优化。</div></aside>
+<main id="main" class=""><header class="page-header"><span class="eyebrow">NANO-VLLM / 从请求到 GPU</span><h1>从一个请求读懂 nano-vLLM</h1><p class="lead">先串起单 GPU 的一次生成，再逐步补上缓存、调度与执行优化。每章只解决一个问题。</p></header>
+<article>
+<div class="takeaway"><strong>第一阶段的目标</strong><p>能解释：两个长度不同的请求怎么一起生成；其中一个结束后，另一个为什么还能继续；它们的 KV 存在什么地方。</p></div>
+<h2>先建立这一条主线</h2>
+<div class="flow" aria-label="执行流程"><div class="node "><strong>LLMEngine</strong><small>串起每一轮执行</small></div><span class="arrow" aria-hidden="true">→</span><div class="node "><strong>Scheduler</strong><small>选请求、安排 token、分块</small></div><span class="arrow" aria-hidden="true">→</span><div class="node gpu"><strong>ModelRunner</strong><small>准备输入、调用 GPU</small></div><span class="arrow" aria-hidden="true">→</span><div class="node "><strong>postprocess</strong><small>更新状态，回收请求</small></div></div>
+<p>CPU 管理请求、块号与执行顺序；GPU 保存权重和 KV 向量，完成张量运算。<code>ModelRunner</code> 本身仍是 CPU 上执行的 Python 对象。</p>
+<h2>推荐的阅读节奏</h2>
+<ol class="path-list"><li><strong>第一遍 · 01—03</strong><small>请求主循环 → 调度器 → KV 分页。先能手算状态，不追 CUDA 内核。</small></li><li><strong>第二遍 · 04—05</strong><small>前缀命中 → K/V 写入 → Attention 读取。把 CPU 块表和 GPU 数据接起来。</small></li><li><strong>第三遍 · 06—07</strong><small>CUDA Graph / 编译 → 多 GPU 张量并行与通信。理解每项优化减少什么开销。</small></li><li><strong>读完就做 · 08</strong><small>运行 CPU 小实验，验证分配、复用、回收和分块调度。</small></li></ol>
+<h2>只需要这些前置知识</h2>
+<p>认识 Python 类、列表、字典和队列；知道 Transformer 从输入计算 Q/K/V，再预测下一个 token；理解 Prefill 处理输入、Decode 逐轮生成。遇到术语时查最后一章，不必先学完整套 CUDA。</p>
+<h2>本书对应哪个版本</h2>
+<p>本地提交 <code>bb823b3e0698</code>。所有“查看源码”链接都打开随文档生成的本地快照，带真实行号，离线也能对照。提交之后的本地文件修改，以快照清单中的哈希为准。</p>
+<p>这份工作区的 <code>pyproject.toml</code> 为 Triton / FlashAttention 添加了 Linux 平台条件。它便于在 Mac 上安装部分依赖，但推理代码仍直接使用 CUDA、NCCL 和 Triton，<strong>不等于支持 macOS GPU 推理</strong>。阅读网页无需任何 Python 或 GPU；CPU 实验也不运行模型。</p>
+<p class="small">基础入口：<a class="source-link" href="source/nanovllm__engine__llm_engine.html#L49">LLMEngine.step <span>↗ L49</span></a> · <a class="source-link" href="source/nanovllm__config.html#L7">Config <span>↗ L7</span></a></p>
+</article><nav class="pager" aria-label="章节翻页"><span></span><a href="01-request.html"><small>下一章</small>一轮请求 →</a></nav><footer>依据本地工作区生成 · bb823b3e0698 · <a href="source/manifest.json">源码版本清单</a> · <a href="source/LICENSE.txt">源码 MIT 许可</a></footer></main></div></body></html>

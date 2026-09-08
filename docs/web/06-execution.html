@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="zh-CN"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light"><meta name="description" content="这章可以第二遍再读。区分图重放、局部编译和算法本身的计算量。">
+<title>06 / 减少重复发起计算的开销 · nano-vLLM 学习手册</title><link rel="stylesheet" href="style.css"><script defer src="app.js"></script></head>
+<body><a class="skip-link" href="#main">跳到正文</a>
+<div class="book"><aside class="sidebar"><a class="brand" href="index.html"><span class="brand-mark">n.</span><span>nano-vLLM<small>源码学习手册</small></span></a>
+<div class="edition">本地源码 · bb823b3</div><nav class="chapters" aria-label="学习章节"><a href="index.html" ><span>00</span>阅读路线</a><a href="01-request.html" ><span>01</span>一轮请求</a><a href="02-scheduler.html" ><span>02</span>调度与分块 Prefill</a><a href="03-kv-cache.html" ><span>03</span>KV 分页与地址映射</a><a href="04-prefix.html" ><span>04</span>前缀复用与回收</a><a href="05-attention.html" ><span>05</span>从块表到 Attention</a><a href="06-execution.html" aria-current="page"><span>06</span>CUDA Graph 与编译</a><a href="07-parallel.html" ><span>07</span>多 GPU 与进程通信</a><a href="08-practice.html" ><span>08</span>动手实验与验收</a><a href="09-reference.html" ><span>09</span>术语与功能地图</a></nav>
+<div class="sidebar-note">先读通一个请求，<br>再理解每一项优化。</div></aside>
+<main id="main" class=""><header class="page-header"><span class="eyebrow">NANO-VLLM / 从请求到 GPU</span><h1>06 / 减少重复发起计算的开销</h1><p class="lead">这章可以第二遍再读。区分图重放、局部编译和算法本身的计算量。</p></header>
+<article>
+<h2>为什么 GPU 很快，CPU 仍可能忙</h2>
+<p>一次 Decode 包含很多张量操作。如果每轮都由 Python 和运行时逐项准备与发起，CPU 的开销可能变得明显。CUDA Graph 让一段兼容的 GPU 操作序列先被捕获，再反复重放。</p>
+<div class="flow" aria-label="执行流程"><div class="node "><strong>预热和捕获</strong><small>为若干 batch 大小建立图</small></div><span class="arrow" aria-hidden="true">→</span><div class="node "><strong>填入本轮数据</strong><small>token、位置、块表、长度</small></div><span class="arrow" aria-hidden="true">→</span><div class="node gpu"><strong>graph.replay()</strong><small>执行已捕获的模型流程</small></div><span class="arrow" aria-hidden="true">→</span><div class="node gpu"><strong>logits + 采样</strong><small>得到本轮输出 token</small></div></div>
+<p>nano 捕获的是 <code>self.model(...)</code> 这段模型主干；<code>compute_logits()</code> 和采样在该捕获范围之外。运行时从已捕获 batch 大小中选择能装下当前请求数的一档，剩余槽位用长度 0 和无效写入位置处理。</p>
+<p><a class="source-link" href="source/nanovllm__engine__model_runner.html#L223">ModelRunner.capture_cudagraph <span>↗ L223</span></a> · <a class="source-link" href="source/nanovllm__engine__model_runner.html#L196">ModelRunner.run_model <span>↗ L196</span></a></p>
+<h2>它不会把算力成本变成零</h2>
+<p>矩阵乘法、Attention、读取权重和 KV 仍然发生。图重放主要减少重复组织和发起操作的成本。能节省多少，取决于实际负载里 CPU 发起开销占多少。</p>
+<h2>torch.compile 处理局部计算</h2>
+<p>本地代码给 RMSNorm、残差相加与归一化、RoPE、SiLU 与乘法、采样等函数加了 <code>@torch.compile</code>。编译器可以优化这些函数中的张量计算，具体生成的内核取决于运行环境。</p>
+<figure class="code-box"><figcaption><a class="source-link" href="source/nanovllm__layers__activation.html#L9">SiluAndMul.forward <span>↗ L9</span></a></figcaption><pre><code>def forward(self, x: torch.Tensor) -&gt; torch.Tensor:
+    x, y = x.chunk(2, -1)
+    return F.silu(x) * y</code></pre></figure>
+<p><a class="source-link" href="source/nanovllm__layers__layernorm.html#L29">RMSNorm.add_rms_forward <span>↗ L29</span></a> · <a class="source-link" href="source/nanovllm__layers__rotary_embedding.html#L38">RotaryEmbedding.forward <span>↗ L38</span></a> · <a class="source-link" href="source/nanovllm__layers__sampler.html#L8">Sampler.forward <span>↗ L8</span></a></p>
+<div class="note"><strong>第一次调试建议 enforce_eager=True。</strong><p>这会绕过这里的 CUDA Graph 路径，更容易按普通调用链理解执行；它不会自动移除其他函数上的 <code>@torch.compile</code>。这一点与“完全关闭所有编译”不同。</p></div>
+<h2>采样只看最小功能</h2>
+<p>Sampler 将 logits 除以温度，做 softmax 后随机采样。当前 SamplingParams 只有 temperature、max_tokens、ignore_eos；代码明确要求温度大于 1e-10，不支持通过 temperature=0 切换贪心采样。</p>
+<p><a class="source-link" href="source/nanovllm__sampling_params.html#L5">SamplingParams <span>↗ L5</span></a> · <a class="source-link" href="source/nanovllm__layers__sampler.html#L8">Sampler.forward <span>↗ L8</span></a></p>
+<details class="checkpoint"><summary>自检 · CUDA Graph 重放的是上一次算出来的答案吗？</summary><div><p>不是。每轮先把新 token、位置和块表等数据填入固定的缓冲区，再执行同一段 GPU 操作流程。重用的是操作组织方式，计算结果仍取决于本轮输入。</p></div></details>
+</article><nav class="pager" aria-label="章节翻页"><a href="05-attention.html"><small>上一章</small>← 从块表到 Attention</a><a href="07-parallel.html"><small>下一章</small>多 GPU 与进程通信 →</a></nav><footer>依据本地工作区生成 · bb823b3e0698 · <a href="source/manifest.json">源码版本清单</a> · <a href="source/LICENSE.txt">源码 MIT 许可</a></footer></main></div></body></html>

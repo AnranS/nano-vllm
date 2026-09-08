@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="zh-CN"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light"><meta name="description" content="阅读 llm_engine.py 和 sequence.py。先理解每轮状态，再进入模型内部。">
+<title>01 / 一个请求怎样生成文本 · nano-vLLM 学习手册</title><link rel="stylesheet" href="style.css"><script defer src="app.js"></script></head>
+<body><a class="skip-link" href="#main">跳到正文</a>
+<div class="book"><aside class="sidebar"><a class="brand" href="index.html"><span class="brand-mark">n.</span><span>nano-vLLM<small>源码学习手册</small></span></a>
+<div class="edition">本地源码 · bb823b3</div><nav class="chapters" aria-label="学习章节"><a href="index.html" ><span>00</span>阅读路线</a><a href="01-request.html" aria-current="page"><span>01</span>一轮请求</a><a href="02-scheduler.html" ><span>02</span>调度与分块 Prefill</a><a href="03-kv-cache.html" ><span>03</span>KV 分页与地址映射</a><a href="04-prefix.html" ><span>04</span>前缀复用与回收</a><a href="05-attention.html" ><span>05</span>从块表到 Attention</a><a href="06-execution.html" ><span>06</span>CUDA Graph 与编译</a><a href="07-parallel.html" ><span>07</span>多 GPU 与进程通信</a><a href="08-practice.html" ><span>08</span>动手实验与验收</a><a href="09-reference.html" ><span>09</span>术语与功能地图</a></nav>
+<div class="sidebar-note">先读通一个请求，<br>再理解每一项优化。</div></aside>
+<main id="main" class=""><header class="page-header"><span class="eyebrow">NANO-VLLM / 从请求到 GPU</span><h1>01 / 一个请求怎样生成文本</h1><p class="lead">阅读 llm_engine.py 和 sequence.py。先理解每轮状态，再进入模型内部。</p></header>
+<article>
+<h2>入口只有三件事</h2>
+<p><code>generate()</code> 先把这一批 Prompt 加入等待队列，随后反复调用 <code>step()</code>，最后把生成的 token 解码成文本。一次 <code>step()</code> 是一次调度迭代，不是一个完整请求。</p>
+<figure class="code-box"><figcaption><a class="source-link" href="source/nanovllm__engine__llm_engine.html#L49">LLMEngine.step <span>↗ L49</span></a></figcaption><pre><code>def step(self):
+    seqs, is_prefill = self.scheduler.schedule()
+    num_tokens = sum(seq.num_scheduled_tokens for seq in seqs) if is_prefill else -len(seqs)
+    token_ids = self.model_runner.call(&quot;run&quot;, seqs, is_prefill)
+    self.scheduler.postprocess(seqs, token_ids, is_prefill)
+    outputs = [(seq.seq_id, seq.completion_token_ids) for seq in seqs if seq.is_finished]
+    return outputs, num_tokens</code></pre></figure>
+<p><code>schedule()</code> 决定本轮算谁、算多少 token；<code>run()</code> 得到预测 token；<code>postprocess()</code> 把结果写回请求状态。</p>
+<h2>Sequence 是请求的账本</h2>
+<div class="table-wrap"><table><thead><tr><th scope="col">字段</th><th scope="col">含义</th></tr></thead><tbody><tr><td>token_ids / num_tokens</td><td>输入 token 加上已经采样出来的输出 token。</td></tr><tr><td>num_cached_tokens</td><td>已存在可用 KV 的 token 数，不包含刚采样出来但尚未送入模型的 token。</td></tr><tr><td>num_scheduled_tokens</td><td>本轮计划送入模型的 token 数。</td></tr><tr><td>block_table</td><td>请求的逻辑块 → GPU 缓存池块号。</td></tr><tr><td>status</td><td>WAITING → RUNNING → FINISHED；抢占时可退回 WAITING。</td></tr></tbody></table></div>
+<p><a class="source-link" href="source/nanovllm__engine__sequence.html#L14">Sequence <span>↗ L14</span></a> · <a class="source-link" href="source/nanovllm__engine__scheduler.html#L81">Scheduler.postprocess <span>↗ L81</span></a></p>
+<h2>手推一遍：4 个输入，生成 3 个 token</h2>
+<p>下面假设不中途遇到 EOS，<code>max_tokens=3</code>，不命中前缀，也不发生抢占。默认块大小仍是 256，4 个输入只是为了看清时间顺序。</p>
+<div class="table-wrap"><table><thead><tr><th scope="col">时刻</th><th scope="col">送入模型</th><th scope="col">模型计算后的有效 KV</th><th scope="col">采样后的总 token 数</th></tr></thead><tbody><tr><td>开始</td><td>—</td><td>0</td><td>4</td></tr><tr><td>第 1 轮 · Prefill</td><td>4 个输入 token</td><td>4</td><td>5</td></tr><tr><td>第 2 轮 · Decode</td><td>第 1 个输出 token</td><td>5</td><td>6</td></tr><tr><td>第 3 轮 · Decode</td><td>第 2 个输出 token</td><td>6；随后释放引用</td><td>7；请求结束</td></tr></tbody></table></div>
+<div class="takeaway"><strong>刚预测出的 token，还没有它自己的 KV。</strong><p>它要在下一轮作为模型输入，才产生 K/V。最后一个输出 token 如果已经触发结束，就不必再为它计算 KV。</p></div>
+<h2>第一次读源码只跟这四处</h2>
+<p><a class="source-link" href="source/nanovllm__engine__llm_engine.html#L60">LLMEngine.generate <span>↗ L60</span></a> → <a class="source-link" href="source/nanovllm__engine__llm_engine.html#L43">LLMEngine.add_request <span>↗ L43</span></a> → <a class="source-link" href="source/nanovllm__engine__llm_engine.html#L49">LLMEngine.step <span>↗ L49</span></a> → <a class="source-link" href="source/nanovllm__engine__scheduler.html#L81">Scheduler.postprocess <span>↗ L81</span></a></p>
+<details class="checkpoint"><summary>自检 · 为什么总 token 数会比 num_cached_tokens 多 1？</summary><div><p>采样结果已经追加进 token_ids，但该 token 还没作为下一轮输入计算 K/V。请求完成后 deallocate() 会把缓存计数清零，所以要分清“更新前”与“释放后”。</p></div></details>
+</article><nav class="pager" aria-label="章节翻页"><a href="index.html"><small>上一章</small>← 阅读路线</a><a href="02-scheduler.html"><small>下一章</small>调度与分块 Prefill →</a></nav><footer>依据本地工作区生成 · bb823b3e0698 · <a href="source/manifest.json">源码版本清单</a> · <a href="source/LICENSE.txt">源码 MIT 许可</a></footer></main></div></body></html>

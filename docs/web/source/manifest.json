@@ -1,0 +1,372 @@
+{
+  "commit": "bb823b3e06983d71485a8e1f23715ebd87d98ef8",
+  "description": "Local source snapshots, not live file views. Rebuild after editing code.",
+  "files": {
+    "nanovllm/__init__.py": {
+      "sha256": "42996c92a5c18d1e333eb57c7d670b2eac53b132df81d53cc6286a89125c9d77",
+      "lines": 2
+    },
+    "nanovllm/config.py": {
+      "sha256": "bca5fddf17092e26d14075348965e46a3b707f5ad780b04b31f48e91bd38e98c",
+      "lines": 25
+    },
+    "nanovllm/engine/block_manager.py": {
+      "sha256": "d0240374f589eaa85c4c7923b8970f2635ab7bc73adc5044fa2d273955b54242",
+      "lines": 120
+    },
+    "nanovllm/engine/llm_engine.py": {
+      "sha256": "c8132cd9f5e66faeea51d0ed6a64d7f4fd8ec5a5823dc2505c2aee51ba049aa1",
+      "lines": 90
+    },
+    "nanovllm/engine/model_runner.py": {
+      "sha256": "2373c9daad7de3956905c9a0ec9d6b2e0a8d355a209162de8570507c5f419fd7",
+      "lines": 257
+    },
+    "nanovllm/engine/scheduler.py": {
+      "sha256": "e7302942c967d50bb525384fa4a6e0de988d199490479d4f5965d4211bcdbd08",
+      "lines": 92
+    },
+    "nanovllm/engine/sequence.py": {
+      "sha256": "d5bb5c522d22554b5c36de745150ec8b601827ee0388058404dcceef1ae8290d",
+      "lines": 83
+    },
+    "nanovllm/layers/activation.py": {
+      "sha256": "9dca7e6fae963ecb9d9d582b539d1c18e47825e103dac8c04058d6def8924c64",
+      "lines": 11
+    },
+    "nanovllm/layers/attention.py": {
+      "sha256": "00c2f52cd428bc2f82ff90ef8cbc96b0959a225daaeb035e9e0eaf63a85bfbba",
+      "lines": 75
+    },
+    "nanovllm/layers/embed_head.py": {
+      "sha256": "e823fbd0a1eb9d64a90e93ade7d32f32235f0039bafc97d367d92a8ee06b3d0f",
+      "lines": 66
+    },
+    "nanovllm/layers/layernorm.py": {
+      "sha256": "a661fc4eeef736f29308c736da7d91cbc9d896d662c990a3f887dc6f6c8d7169",
+      "lines": 50
+    },
+    "nanovllm/layers/linear.py": {
+      "sha256": "9fe0d9917e15603d4af435591ba8b4c5f45b253ee1a825607061ca73d50470cf",
+      "lines": 156
+    },
+    "nanovllm/layers/rotary_embedding.py": {
+      "sha256": "82b59b6a5d32e3465c4c9207e690a7e9b5c38219357f1920fa05ff81f7ae3836",
+      "lines": 59
+    },
+    "nanovllm/layers/sampler.py": {
+      "sha256": "63a342a4ec02e846d5872d2906dc25ef5af1b7d66b85a63a6a88668f23543050",
+      "lines": 12
+    },
+    "nanovllm/llm.py": {
+      "sha256": "ffe74fe7f64ba5169471a17596757b8d8f309e75f4db7040ac41b84db2e38179",
+      "lines": 5
+    },
+    "nanovllm/models/qwen3.py": {
+      "sha256": "6156b3477117094f657a6f609df3c051393a23cce1405af6b88dafddb49acd29",
+      "lines": 216
+    },
+    "nanovllm/sampling_params.py": {
+      "sha256": "1e5146d1a06f5230ab049df1ea24814a1d73ba52c3ad22af04bd0f1c6293e0c0",
+      "lines": 11
+    },
+    "nanovllm/utils/context.py": {
+      "sha256": "83a608397c38cf22216dabba9e73b41cf985cf64c7a7f35c5c14e223fcd09959",
+      "lines": 27
+    },
+    "nanovllm/utils/loader.py": {
+      "sha256": "29d4b6c38a8356ad31f8858b1a14e893d7703cd3d5e32f86b0dc9ab3fb866e99",
+      "lines": 28
+    },
+    "example.py": {
+      "sha256": "5c0dca3d548a6cb28cc2168e8d79522f2c49f0f3716735461cdd01354c07cce0",
+      "lines": 33
+    },
+    "bench.py": {
+      "sha256": "42da1e51128ad0746a55be3ac3121268a343dd88d95687d9c2242e9dd3f85af6",
+      "lines": 32
+    }
+  },
+  "references": [
+    {
+      "path": "nanovllm/engine/llm_engine.py",
+      "symbol": "LLMEngine.step",
+      "line": 49
+    },
+    {
+      "path": "nanovllm/config.py",
+      "symbol": "Config",
+      "line": 7
+    },
+    {
+      "path": "nanovllm/engine/llm_engine.py",
+      "symbol": "LLMEngine.step",
+      "line": 49
+    },
+    {
+      "path": "nanovllm/engine/sequence.py",
+      "symbol": "Sequence",
+      "line": 14
+    },
+    {
+      "path": "nanovllm/engine/scheduler.py",
+      "symbol": "Scheduler.postprocess",
+      "line": 81
+    },
+    {
+      "path": "nanovllm/engine/llm_engine.py",
+      "symbol": "LLMEngine.generate",
+      "line": 60
+    },
+    {
+      "path": "nanovllm/engine/llm_engine.py",
+      "symbol": "LLMEngine.add_request",
+      "line": 43
+    },
+    {
+      "path": "nanovllm/engine/llm_engine.py",
+      "symbol": "LLMEngine.step",
+      "line": 49
+    },
+    {
+      "path": "nanovllm/engine/scheduler.py",
+      "symbol": "Scheduler.postprocess",
+      "line": 81
+    },
+    {
+      "path": "nanovllm/engine/scheduler.py",
+      "symbol": "Scheduler.schedule",
+      "line": 25
+    },
+    {
+      "path": "nanovllm/engine/block_manager.py",
+      "symbol": "BlockManager.allocate",
+      "line": 75
+    },
+    {
+      "path": "nanovllm/engine/scheduler.py",
+      "symbol": "Scheduler.preempt",
+      "line": 75
+    },
+    {
+      "path": "nanovllm/engine/model_runner.py",
+      "symbol": "ModelRunner.allocate_kv_cache",
+      "line": 103
+    },
+    {
+      "path": "nanovllm/config.py",
+      "symbol": "Config",
+      "line": 7
+    },
+    {
+      "path": "nanovllm/engine/model_runner.py",
+      "symbol": "ModelRunner.prepare_decode",
+      "line": 172
+    },
+    {
+      "path": "nanovllm/engine/sequence.py",
+      "symbol": "Sequence.num_blocks",
+      "line": 56
+    },
+    {
+      "path": "nanovllm/engine/block_manager.py",
+      "symbol": "BlockManager.may_append",
+      "line": 106
+    },
+    {
+      "path": "nanovllm/engine/block_manager.py",
+      "symbol": "BlockManager.compute_hash",
+      "line": 36
+    },
+    {
+      "path": "nanovllm/engine/block_manager.py",
+      "symbol": "BlockManager.can_allocate",
+      "line": 58
+    },
+    {
+      "path": "nanovllm/engine/block_manager.py",
+      "symbol": "BlockManager.hash_blocks",
+      "line": 110
+    },
+    {
+      "path": "nanovllm/engine/block_manager.py",
+      "symbol": "BlockManager.allocate",
+      "line": 75
+    },
+    {
+      "path": "nanovllm/engine/block_manager.py",
+      "symbol": "BlockManager.deallocate",
+      "line": 94
+    },
+    {
+      "path": "nanovllm/engine/block_manager.py",
+      "symbol": "BlockManager._allocate_block",
+      "line": 43
+    },
+    {
+      "path": "nanovllm/models/qwen3.py",
+      "symbol": "Qwen3Attention.forward",
+      "line": 72
+    },
+    {
+      "path": "nanovllm/layers/attention.py",
+      "symbol": "store_kvcache_kernel",
+      "line": 11
+    },
+    {
+      "path": "nanovllm/layers/attention.py",
+      "symbol": "store_kvcache",
+      "line": 33
+    },
+    {
+      "path": "nanovllm/layers/attention.py",
+      "symbol": "Attention.forward",
+      "line": 59
+    },
+    {
+      "path": "nanovllm/engine/model_runner.py",
+      "symbol": "ModelRunner.prepare_prefill",
+      "line": 129
+    },
+    {
+      "path": "nanovllm/engine/model_runner.py",
+      "symbol": "ModelRunner.prepare_decode",
+      "line": 172
+    },
+    {
+      "path": "nanovllm/engine/model_runner.py",
+      "symbol": "ModelRunner.capture_cudagraph",
+      "line": 223
+    },
+    {
+      "path": "nanovllm/engine/model_runner.py",
+      "symbol": "ModelRunner.run_model",
+      "line": 196
+    },
+    {
+      "path": "nanovllm/layers/activation.py",
+      "symbol": "SiluAndMul.forward",
+      "line": 9
+    },
+    {
+      "path": "nanovllm/layers/layernorm.py",
+      "symbol": "RMSNorm.add_rms_forward",
+      "line": 29
+    },
+    {
+      "path": "nanovllm/layers/rotary_embedding.py",
+      "symbol": "RotaryEmbedding.forward",
+      "line": 38
+    },
+    {
+      "path": "nanovllm/layers/sampler.py",
+      "symbol": "Sampler.forward",
+      "line": 8
+    },
+    {
+      "path": "nanovllm/sampling_params.py",
+      "symbol": "SamplingParams",
+      "line": 5
+    },
+    {
+      "path": "nanovllm/layers/sampler.py",
+      "symbol": "Sampler.forward",
+      "line": 8
+    },
+    {
+      "path": "nanovllm/engine/llm_engine.py",
+      "symbol": "LLMEngine.__init__",
+      "line": 17
+    },
+    {
+      "path": "nanovllm/engine/model_runner.py",
+      "symbol": "ModelRunner.__init__",
+      "line": 17
+    },
+    {
+      "path": "nanovllm/engine/model_runner.py",
+      "symbol": "ModelRunner.write_shm",
+      "line": 76
+    },
+    {
+      "path": "nanovllm/engine/model_runner.py",
+      "symbol": "ModelRunner.read_shm",
+      "line": 68
+    },
+    {
+      "path": "nanovllm/engine/sequence.py",
+      "symbol": "Sequence.__getstate__",
+      "line": 72
+    },
+    {
+      "path": "nanovllm/layers/linear.py",
+      "symbol": "ColumnParallelLinear",
+      "line": 54
+    },
+    {
+      "path": "nanovllm/layers/linear.py",
+      "symbol": "RowParallelLinear.forward",
+      "line": 152
+    },
+    {
+      "path": "nanovllm/layers/embed_head.py",
+      "symbol": "ParallelLMHead.forward",
+      "line": 56
+    },
+    {
+      "path": "example.py",
+      "symbol": "main",
+      "line": 6
+    },
+    {
+      "path": "nanovllm/engine/llm_engine.py",
+      "symbol": "LLMEngine.step",
+      "line": 49
+    },
+    {
+      "path": "nanovllm/engine/scheduler.py",
+      "symbol": "Scheduler.schedule",
+      "line": 25
+    },
+    {
+      "path": "nanovllm/engine/block_manager.py",
+      "symbol": "BlockManager",
+      "line": 26
+    },
+    {
+      "path": "nanovllm/layers/attention.py",
+      "symbol": "Attention.forward",
+      "line": 59
+    },
+    {
+      "path": "nanovllm/engine/model_runner.py",
+      "symbol": "ModelRunner.capture_cudagraph",
+      "line": 223
+    },
+    {
+      "path": "nanovllm/layers/layernorm.py",
+      "symbol": "RMSNorm",
+      "line": 5
+    },
+    {
+      "path": "nanovllm/layers/linear.py",
+      "symbol": "RowParallelLinear",
+      "line": 131
+    },
+    {
+      "path": "nanovllm/engine/model_runner.py",
+      "symbol": "ModelRunner.write_shm",
+      "line": 76
+    },
+    {
+      "path": "nanovllm/models/qwen3.py",
+      "symbol": "Qwen3ForCausalLM",
+      "line": 186
+    },
+    {
+      "path": "nanovllm/sampling_params.py",
+      "symbol": "SamplingParams",
+      "line": 5
+    }
+  ]
+}

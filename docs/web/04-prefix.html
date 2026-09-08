@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="zh-CN"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light"><meta name="description" content="阅读哈希索引、引用计数和空闲队列。复用的单位是已经计算好的完整前缀块。">
+<title>04 / 两个请求如何共用 KV · nano-vLLM 学习手册</title><link rel="stylesheet" href="style.css"><script defer src="app.js"></script></head>
+<body><a class="skip-link" href="#main">跳到正文</a>
+<div class="book"><aside class="sidebar"><a class="brand" href="index.html"><span class="brand-mark">n.</span><span>nano-vLLM<small>源码学习手册</small></span></a>
+<div class="edition">本地源码 · bb823b3</div><nav class="chapters" aria-label="学习章节"><a href="index.html" ><span>00</span>阅读路线</a><a href="01-request.html" ><span>01</span>一轮请求</a><a href="02-scheduler.html" ><span>02</span>调度与分块 Prefill</a><a href="03-kv-cache.html" ><span>03</span>KV 分页与地址映射</a><a href="04-prefix.html" aria-current="page"><span>04</span>前缀复用与回收</a><a href="05-attention.html" ><span>05</span>从块表到 Attention</a><a href="06-execution.html" ><span>06</span>CUDA Graph 与编译</a><a href="07-parallel.html" ><span>07</span>多 GPU 与进程通信</a><a href="08-practice.html" ><span>08</span>动手实验与验收</a><a href="09-reference.html" ><span>09</span>术语与功能地图</a></nav>
+<div class="sidebar-note">先读通一个请求，<br>再理解每一项优化。</div></aside>
+<main id="main" class=""><header class="page-header"><span class="eyebrow">NANO-VLLM / 从请求到 GPU</span><h1>04 / 两个请求如何共用 KV</h1><p class="lead">阅读哈希索引、引用计数和空闲队列。复用的单位是已经计算好的完整前缀块。</p></header>
+<article>
+<h2>先有相同上下文，才可能有相同 KV</h2>
+<p>同样一段 token 放在不同前文之后，其 K/V 可以不同。nano 的块哈希把前面的哈希也纳入计算：</p>
+<figure class="code-box"><figcaption>链式前缀哈希；实际使用 xxhash.xxh64()</figcaption><pre><code>h0 = hash(第 0 块 token)
+h1 = hash(h0, 第 1 块 token)
+h2 = hash(h1, 第 2 块 token)</code></pre></figure>
+<p><code>hash_to_block_id</code> 保存哈希到缓存块号的映射。查找时还比较当前块的 token IDs，并从前往后连续匹配，一处失败便停止。GPU 计算完成后，<code>hash_blocks()</code> 把新完成的完整块加入索引。</p>
+<p><a class="source-link" href="source/nanovllm__engine__block_manager.html#L36">BlockManager.compute_hash <span>↗ L36</span></a> · <a class="source-link" href="source/nanovllm__engine__block_manager.html#L58">BlockManager.can_allocate <span>↗ L58</span></a> · <a class="source-link" href="source/nanovllm__engine__block_manager.html#L110">BlockManager.hash_blocks <span>↗ L110</span></a></p>
+<h2>一个具体例子</h2>
+<p>A 和 B 的 Prompt 都长 600，前 512 个 token 完全一致。A 已完成 Prefill，它的块表是示意值 <code>[7, 2, 19]</code>；B 到来后，可以得到 <code>[7, 2, 4]</code>。</p>
+<div class="table-wrap"><table><thead><tr><th scope="col">逻辑位置</th><th scope="col">请求 A</th><th scope="col">请求 B</th><th scope="col">处理方式</th></tr></thead><tbody><tr><td>前 256 个 token</td><td>块 7</td><td>块 7</td><td>共用，引用数从 1 变 2。</td></tr><tr><td>接下来 256 个 token</td><td>块 2</td><td>块 2</td><td>共用，引用数从 1 变 2。</td></tr><tr><td>最后 88 个 token</td><td>块 19</td><td>块 4</td><td>分别持有自己的尾块。</td></tr></tbody></table></div>
+<p>B 的 <code>num_cached_tokens=512</code>，只计算剩余 88 个输入 token 的新 Q/K/V。但这些新 Q 做 Attention 时，仍然要读取前面 512 个 token 的 KV。命中前缀减少重复 Prefill，不代表后续 Attention 可以忽略前文。</p>
+<div class="note"><strong>本地版本会排除请求最后一个逻辑块的直接复用。</strong><p><code>can_allocate()</code> 遍历 <code>range(seq.num_blocks - 1)</code>。即使最后一块恰好填满，也留给重新计算，从而保留产生当前输出 logits 的执行路径。例如同样的 512-token Prompt，最多直接复用前 256 个，而不是直接跳过全部 512 个。</p></div>
+<h2>“空闲”为什么还能命中</h2>
+<div class="table-wrap"><table><thead><tr><th scope="col">事件</th><th scope="col">引用数</th><th scope="col">块的状态</th></tr></thead><tbody><tr><td>A、B 共用</td><td>2</td><td>不能回收覆盖。</td></tr><tr><td>A 结束</td><td>1</td><td>B 仍在用。</td></tr><tr><td>B 结束</td><td>0</td><td>进入空闲队列；原 KV 与哈希可暂留。</td></tr><tr><td>新请求命中旧前缀</td><td>0 → 1</td><td>从空闲队列取回该块，直接复用。</td></tr><tr><td>空闲块被分给其他内容</td><td>0 → 1</td><td>删除旧哈希关联、重置元信息，随后写入新 KV。</td></tr></tbody></table></div>
+<p>这里没有按时间过期的 TTL。回收由引用计数和池空间压力驱动；<code>deallocate()</code> 不会释放整个 GPU Tensor。不要把空闲队列误认为“已经清零的显存”。</p>
+<p><a class="source-link" href="source/nanovllm__engine__block_manager.html#L75">BlockManager.allocate <span>↗ L75</span></a> · <a class="source-link" href="source/nanovllm__engine__block_manager.html#L94">BlockManager.deallocate <span>↗ L94</span></a> · <a class="source-link" href="source/nanovllm__engine__block_manager.html#L43">BlockManager._allocate_block <span>↗ L43</span></a></p>
+<details class="checkpoint"><summary>自检 · 能把还没有填满的尾块共享给两个继续增长的请求吗？</summary><div><p>当前 nano 的前缀复用避开尾块，每个请求拥有自己的可写尾部，因此无需为这种场景实现完整的写时复制逻辑。共享的是已完成、无需继续修改的前缀块。</p></div></details>
+</article><nav class="pager" aria-label="章节翻页"><a href="03-kv-cache.html"><small>上一章</small>← KV 分页与地址映射</a><a href="05-attention.html"><small>下一章</small>从块表到 Attention →</a></nav><footer>依据本地工作区生成 · bb823b3e0698 · <a href="source/manifest.json">源码版本清单</a> · <a href="source/LICENSE.txt">源码 MIT 许可</a></footer></main></div></body></html>

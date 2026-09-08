@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="zh-CN"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light"><meta name="description" content="先看一台机器上的张量并行。把 CPU 发任务和 GPU 交换张量分开理解。">
+<title>07 / 两张 GPU 怎么一起推理 · nano-vLLM 学习手册</title><link rel="stylesheet" href="style.css"><script defer src="app.js"></script></head>
+<body><a class="skip-link" href="#main">跳到正文</a>
+<div class="book"><aside class="sidebar"><a class="brand" href="index.html"><span class="brand-mark">n.</span><span>nano-vLLM<small>源码学习手册</small></span></a>
+<div class="edition">本地源码 · bb823b3</div><nav class="chapters" aria-label="学习章节"><a href="index.html" ><span>00</span>阅读路线</a><a href="01-request.html" ><span>01</span>一轮请求</a><a href="02-scheduler.html" ><span>02</span>调度与分块 Prefill</a><a href="03-kv-cache.html" ><span>03</span>KV 分页与地址映射</a><a href="04-prefix.html" ><span>04</span>前缀复用与回收</a><a href="05-attention.html" ><span>05</span>从块表到 Attention</a><a href="06-execution.html" ><span>06</span>CUDA Graph 与编译</a><a href="07-parallel.html" aria-current="page"><span>07</span>多 GPU 与进程通信</a><a href="08-practice.html" ><span>08</span>动手实验与验收</a><a href="09-reference.html" ><span>09</span>术语与功能地图</a></nav>
+<div class="sidebar-note">先读通一个请求，<br>再理解每一项优化。</div></aside>
+<main id="main" class=""><header class="page-header"><span class="eyebrow">NANO-VLLM / 从请求到 GPU</span><h1>07 / 两张 GPU 怎么一起推理</h1><p class="lead">先看一台机器上的张量并行。把 CPU 发任务和 GPU 交换张量分开理解。</p></header>
+<article>
+<h2>单 GPU 先记住这一点</h2>
+<p>调用进程内同时有 Scheduler 和 rank 0 的 ModelRunner。配置 TP&gt;1 时，引擎通过 <code>multiprocessing</code> 的 spawn 方式，为 rank 1、rank 2 等启动额外进程；每个进程设置自己的 CUDA 设备。</p>
+<div class="table-wrap"><table><thead><tr><th scope="col">位置</th><th scope="col">职责</th></tr></thead><tbody><tr><td>主 CPU 进程</td><td>维护请求与调度器；持有 rank 0 ModelRunner；控制 GPU 0。</td></tr><tr><td>其他 CPU 工作进程</td><td>持有各自 ModelRunner；接收执行命令；控制对应 GPU。</td></tr><tr><td>每张 GPU</td><td>保存本卡模型分片与本卡 KV 头的缓存；完成局部张量运算。</td></tr></tbody></table></div>
+<p><a class="source-link" href="source/nanovllm__engine__llm_engine.html#L17">LLMEngine.__init__ <span>↗ L17</span></a> · <a class="source-link" href="source/nanovllm__engine__model_runner.html#L17">ModelRunner.__init__ <span>↗ L17</span></a></p>
+<h2>CPU 发任务：共享内存 + Event</h2>
+<p>rank 0 把方法名和参数用 pickle 序列化，写入一块 1 MiB 的 CPU 共享内存，然后设置各 worker 的 Event。worker 等待 Event，读取并反序列化，调用相应方法。这里传递的是执行命令与请求元信息，不是整份 GPU KV。</p>
+<div class="flow" aria-label="执行流程"><div class="node "><strong>rank 0</strong><small>序列化 run 与请求参数</small></div><span class="arrow" aria-hidden="true">→</span><div class="node "><strong>CPU 共享内存</strong><small>写消息；Event 通知</small></div><span class="arrow" aria-hidden="true">→</span><div class="node "><strong>rank 1…</strong><small>读消息，调用 ModelRunner</small></div><span class="arrow" aria-hidden="true">→</span><div class="node gpu"><strong>各自 GPU</strong><small>运行本卡模型分片</small></div></div>
+<p>这个本地路径没有使用 ZMQ。Decode 序列化还会减少请求内容，只发送下一轮需要的最后一个 token 等状态，而不总是复制完整历史。</p>
+<p><a class="source-link" href="source/nanovllm__engine__model_runner.html#L76">ModelRunner.write_shm <span>↗ L76</span></a> · <a class="source-link" href="source/nanovllm__engine__model_runner.html#L68">ModelRunner.read_shm <span>↗ L68</span></a> · <a class="source-link" href="source/nanovllm__engine__sequence.html#L72">Sequence.__getstate__ <span>↗ L72</span></a></p>
+<h2>GPU 协作：分片权重 + NCCL</h2>
+<p>以数学记号 <code>Y=XW</code> 解释，按输出维度拆 W，可以让两张卡得到 Y 的不同部分；按输入维度拆 W，则两张卡产生同一输出的部分和，最后相加。</p>
+<figure class="code-box"><figcaption>数学示意；PyTorch F.linear 的权重存储形状是 [out_features, in_features]</figcaption><pre><code>按输出维度拆：W = [W0 | W1]      → Y0 = XW0，Y1 = XW1
+按输入维度拆：X = [X0 | X1]      → Y = X0W0 + X1W1</code></pre></figure>
+<p><code>ColumnParallelLinear</code> 切分输出特征；<code>RowParallelLinear</code> 切分输入特征并用 <code>dist.all_reduce()</code> 汇总部分结果。Q/K/V 按头拆分；词表嵌入和输出头也有分片处理。最终 logits 收集到 rank 0，由它采样输出。</p>
+<p><a class="source-link" href="source/nanovllm__layers__linear.html#L54">ColumnParallelLinear <span>↗ L54</span></a> · <a class="source-link" href="source/nanovllm__layers__linear.html#L152">RowParallelLinear.forward <span>↗ L152</span></a> · <a class="source-link" href="source/nanovllm__layers__embed_head.html#L56">ParallelLMHead.forward <span>↗ L56</span></a></p>
+<div class="note"><strong>这个实现面向单机 TP。</strong><p>初始化使用 localhost 的 NCCL rendezvous 地址，本机共享内存传命令；没有完整的跨节点部署、流水线并行或专家并行调度。配置还要求相关头数、词表等维度满足切分条件。</p></div>
+<details class="checkpoint"><summary>自检 · 共享内存队列负责传递 all-reduce 的张量吗？</summary><div><p>不负责。共享内存 + Event 是 CPU 进程之间的命令通道；模型执行中的张量集体通信由 torch.distributed 的 NCCL 后端完成。</p></div></details>
+</article><nav class="pager" aria-label="章节翻页"><a href="06-execution.html"><small>上一章</small>← CUDA Graph 与编译</a><a href="08-practice.html"><small>下一章</small>动手实验与验收 →</a></nav><footer>依据本地工作区生成 · bb823b3e0698 · <a href="source/manifest.json">源码版本清单</a> · <a href="source/LICENSE.txt">源码 MIT 许可</a></footer></main></div></body></html>
