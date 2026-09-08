@@ -10,6 +10,8 @@
 
 A lightweight vLLM implementation built from scratch.
 
+📖 **[中文源码学习手册 · 在线阅读](https://anrans.github.io/nano-vllm/)** — 请求流程、调度、KV Cache、前缀复用与 GPU 执行。
+
 ## Key Features
 
 * 🚀 **Fast offline inference** - Comparable inference speeds to vLLM

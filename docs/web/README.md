@@ -1,4 +1,6 @@
-# nano-vLLM 本地学习文档
+# nano-vLLM 学习文档
+
+**[在线阅读](https://anrans.github.io/nano-vllm/)** · 部署在本 fork 的 GitHub Pages。
 
 双击 `index.html`，即可在浏览器离线阅读。无需启动服务器、安装前端依赖或连接网络。
 
@@ -72,3 +74,9 @@ python3 docs/web/serve.py
 仍可双击 `index.html` 离线阅读，无须启动服务。
 
 源码快照遵循原项目 MIT 许可，见 `source/LICENSE.txt`。文档未修改推理代码、项目依赖或现有锁文件。
+
+## GitHub Pages 自动发布
+
+工作流位于 `.github/workflows/deploy-docs.yml`。向 `main` 推送文档、模型源码或工作流的改动后，GitHub Actions 会重新生成页面与源码快照、检查离线链接和引用行号，再发布到 GitHub Pages。也可以在 Actions 页面手动运行此工作流。
+
+发布内容为 HTML、CSS、JavaScript 和源码快照；网页运行不需要 Python、模型权重或 GPU。本地离线阅读与 `start.sh` 启动方式继续可用。
