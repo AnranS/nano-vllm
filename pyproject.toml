@@ -25,3 +25,18 @@ Homepage="https://github.com/GeeeekExplorer/nano-vllm"
 [tool.setuptools.packages.find]
 where = ["."]
 include = ["nanovllm*"]
+
+# Keep the development runtime aligned with the prebuilt CUDA 13 extension.
+[tool.uv]
+constraint-dependencies = [
+    "torch==2.12.1",
+    "flash-attn==2.8.3.post1+cu.13.0.torch.2.12; sys_platform == 'linux'",
+]
+
+[tool.uv.sources]
+flash-attn = { index = "astral-cu130" }
+
+[[tool.uv.index]]
+name = "astral-cu130"
+url = "https://wheels.astral.sh/simple/cu130/"
+explicit = true

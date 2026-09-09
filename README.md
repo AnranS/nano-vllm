@@ -24,6 +24,8 @@ A lightweight vLLM implementation built from scratch.
 pip install git+https://github.com/GeeeekExplorer/nano-vllm.git
 ```
 
+For local development with `uv`, see [开发环境配置](docs/development.md).
+
 ## Model Download
 
 To download the model weights manually, use the following command:
