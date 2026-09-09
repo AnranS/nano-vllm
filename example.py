@@ -1,10 +1,9 @@
-import os
 from nanovllm import LLM, SamplingParams
 from transformers import AutoTokenizer
 
 
 def main():
-    path = os.path.expanduser("~/huggingface/Qwen3-0.6B/")
+    path = "/home/codex/.cache/huggingface/hub/models--Qwen--Qwen3-0.6B/snapshots/c1899de289a04d12100db370d81485cdf75e47ca"
     tokenizer = AutoTokenizer.from_pretrained(path)
     llm = LLM(path, enforce_eager=True, tensor_parallel_size=1)
 
@@ -13,7 +12,7 @@ def main():
         "introduce yourself",
         "list all prime numbers within 100",
     ]
-    prompts = [
+    templated_prompts = [
         tokenizer.apply_chat_template(
             [{"role": "user", "content": prompt}],
             tokenize=False,
@@ -21,12 +20,21 @@ def main():
         )
         for prompt in prompts
     ]
-    outputs = llm.generate(prompts, sampling_params)
-
-    for prompt, output in zip(prompts, outputs):
-        print("\n")
-        print(f"Prompt: {prompt!r}")
-        print(f"Completion: {output['text']!r}")
+    outputs = llm.generate(templated_prompts, sampling_params)
+    for i, (prompt, output) in enumerate(zip(prompts, outputs), 1):
+        text = tokenizer.decode(output["token_ids"], skip_special_tokens=True)
+        if text.startswith("<think>"):
+            thinking, _, answer = text.removeprefix("<think>").partition("</think>")
+        else:
+            thinking, answer = "", text
+        print(f"\n{'=' * 60}")
+        print(f"[{i}/{len(prompts)}] {prompt}")
+        print("-" * 60)
+        if thinking:
+            print(f"<thinking>\n{thinking.strip()}\n</thinking>\n")
+        if answer.strip():
+            print(answer.strip())
+        print(f"\n({len(output['token_ids'])} tokens)")
 
 
 if __name__ == "__main__":

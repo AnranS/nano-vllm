@@ -1,6 +1,6 @@
-import os
 import time
 from random import randint, seed
+from huggingface_hub import snapshot_download
 from nanovllm import LLM, SamplingParams
 # from vllm import LLM, SamplingParams
 
@@ -11,7 +11,7 @@ def main():
     max_input_len = 1024
     max_ouput_len = 1024
 
-    path = os.path.expanduser("~/huggingface/Qwen3-0.6B/")
+    path = snapshot_download("Qwen/Qwen3-0.6B")
     llm = LLM(path, enforce_eager=False, max_model_len=4096)
 
     prompt_token_ids = [[randint(0, 10000) for _ in range(randint(100, max_input_len))] for _ in range(num_seqs)]
