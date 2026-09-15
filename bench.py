@@ -27,9 +27,11 @@ def main():
     # prompt_token_ids = [dict(prompt_token_ids=p) for p in prompt_token_ids]
 
     llm.generate(["Benchmark: "], SamplingParams())    # 预热一次，把编译和图捕获排除在计时之外
-    t = time.time()
+    # 用 perf_counter 而不是 time.time：后者是 CLOCK_REALTIME，会被 NTP 校时和虚拟机
+    # 时钟漂移影响。在 WSL2 上实测同一份负载能因此高报约 5% 的吞吐。
+    t = time.perf_counter()
     llm.generate(prompt_token_ids, sampling_params, use_tqdm=False)
-    t = (time.time() - t)
+    t = (time.perf_counter() - t)
     total_tokens = sum(sp.max_tokens for sp in sampling_params)    # 只统计输出 token，不含 prompt
     throughput = total_tokens / t
     print(f"Total: {total_tokens}tok, Time: {t:.2f}s, Throughput: {throughput:.2f}tok/s")
