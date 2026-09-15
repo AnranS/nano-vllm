@@ -4,7 +4,7 @@
 <title>02 / 每轮应该计算谁 · nano-vLLM 学习手册</title><link rel="stylesheet" href="style.css"><script defer src="app.js"></script></head>
 <body><a class="skip-link" href="#main">跳到正文</a>
 <div class="book"><aside class="sidebar"><a class="brand" href="index.html"><span class="brand-mark">n.</span><span>nano-vLLM<small>源码学习手册</small></span></a>
-<div class="edition">本地源码 · 677ba52</div><nav class="chapters" aria-label="学习章节"><a href="index.html" ><span>00</span>阅读路线</a><a href="01-request.html" ><span>01</span>一轮请求</a><a href="02-scheduler.html" aria-current="page"><span>02</span>调度与分块 Prefill</a><a href="03-kv-cache.html" ><span>03</span>KV 分页与地址映射</a><a href="04-prefix.html" ><span>04</span>前缀复用与回收</a><a href="05-attention.html" ><span>05</span>从块表到 Attention</a><a href="06-execution.html" ><span>06</span>CUDA Graph 与编译</a><a href="07-parallel.html" ><span>07</span>多 GPU 与进程通信</a><a href="08-practice.html" ><span>08</span>动手实验与验收</a><a href="09-reference.html" ><span>09</span>术语与功能地图</a></nav>
+<div class="edition">本地源码 · 3988556</div><nav class="chapters" aria-label="学习章节"><a href="index.html" ><span>00</span>阅读路线</a><a href="01-request.html" ><span>01</span>一轮请求</a><a href="02-scheduler.html" aria-current="page"><span>02</span>调度与分块 Prefill</a><a href="03-kv-cache.html" ><span>03</span>KV 分页与地址映射</a><a href="04-prefix.html" ><span>04</span>前缀复用与回收</a><a href="05-attention.html" ><span>05</span>从块表到 Attention</a><a href="06-execution.html" ><span>06</span>CUDA Graph 与编译</a><a href="07-parallel.html" ><span>07</span>多 GPU 与进程通信</a><a href="08-practice.html" ><span>08</span>动手实验与验收</a><a href="09-reference.html" ><span>09</span>术语与功能地图</a></nav>
 <div class="sidebar-note">先读通一个请求，<br>再理解每一项优化。</div></aside>
 <main id="main" class=""><header class="page-header"><span class="eyebrow">NANO-VLLM / 从请求到 GPU</span><h1>02 / 每轮应该计算谁</h1><p class="lead">阅读 scheduler.py。区分请求数量、token 预算和可用 KV 块这三个限制。</p></header>
 <article>
@@ -18,14 +18,15 @@
 <p>教学配置：每轮 token 预算为 256，A 的 Prompt 长 600，B 长 128，按 A、B 的顺序排队，缓存足够。两者暂不考虑前缀命中。</p>
 <div class="table-wrap"><table><thead><tr><th scope="col">轮次</th><th scope="col">本轮 Prefill</th><th scope="col">剩余工作</th></tr></thead><tbody><tr><td>1</td><td>A 的前 256 个 token</td><td>A 还剩 344；B 等待。</td></tr><tr><td>2</td><td>A 的中间 256 个 token</td><td>A 还剩 88；B 等待。</td></tr><tr><td>3</td><td>A 的最后 88 + B 的 128，共 216</td><td>两个请求都完成 Prefill，并各采样首个输出。</td></tr><tr><td>4</td><td>进入 Decode，各处理上轮生成的 1 个 token</td><td>两者都尚未结束时，一起继续生成。</td></tr></tbody></table></div>
 <p>对应 <code>min(num_tokens, remaining)</code>。当前实现只允许本轮第一个 Prefill 请求被切块；如果前面已经安排了请求，后一个请求放不下，就留到下轮。<strong>切分的是计算量；首次进入调度时，仍会为当前整个 Prompt 分配所需缓存块。</strong></p>
-<p><a class="source-link" href="source/nanovllm__engine__scheduler.html#L25">Scheduler.schedule <span>↗ L25</span></a> · <a class="source-link" href="source/nanovllm__engine__block_manager.html#L75">BlockManager.allocate <span>↗ L75</span></a></p>
+<p><a class="source-link" href="source/nanovllm__engine__scheduler.html#L29">Scheduler.schedule <span>↗ L29</span></a> · <a class="source-link" href="source/nanovllm__engine__block_manager.html#L95">BlockManager.allocate <span>↗ L95</span></a></p>
 <h2>没有可用 KV 块时</h2>
 <p>Decode 想继续增长却拿不到新块时，调度器会从其他运行请求中选择请求抢占；必要时抢占当前请求。它保留 token 序列，释放块引用，重新放回 <code>waiting</code>。之后可能命中尚未覆盖的前缀缓存，其余部分重新计算。</p>
-<figure class="code-box"><figcaption><a class="source-link" href="source/nanovllm__engine__scheduler.html#L75">Scheduler.preempt <span>↗ L75</span></a></figcaption><pre><code>def preempt(self, seq: Sequence):
+<figure class="code-box"><figcaption><a class="source-link" href="source/nanovllm__engine__scheduler.html#L98">Scheduler.preempt <span>↗ L98</span></a></figcaption><pre><code>def preempt(self, seq: Sequence):
+    &quot;&quot;&quot;抢占一条序列：释放其 KV 块，打回 waiting 队头等待重新 prefill。&quot;&quot;&quot;
     seq.status = SequenceStatus.WAITING
     seq.is_prefill = True
     self.block_manager.deallocate(seq)
     self.waiting.appendleft(seq)</code></pre></figure>
 <p>这里没有 CPU KV 换出，也没有自动扩大 GPU 池。极端配置下，如果单个请求本身就超过池容量，简化调度器可能无法继续；不能把抢占理解成总能解决容量不足。</p>
 <details class="checkpoint"><summary>自检 · 分块 Prefill 为何不等于“每次只分配一个 KV 块”？</summary><div><p>Scheduler 第一次处理请求就调用 allocate()，后者为 seq.num_blocks 个逻辑块建立映射。num_scheduled_tokens 控制这轮算多少，和已经分配多少缓存位置是两件事。</p></div></details>
-</article><nav class="pager" aria-label="章节翻页"><a href="01-request.html"><small>上一章</small>← 一轮请求</a><a href="03-kv-cache.html"><small>下一章</small>KV 分页与地址映射 →</a></nav><footer>依据本地工作区生成 · 677ba52023a0 · <a href="source/manifest.json">源码版本清单</a> · <a href="source/LICENSE.txt">源码 MIT 许可</a></footer></main></div></body></html>
+</article><nav class="pager" aria-label="章节翻页"><a href="01-request.html"><small>上一章</small>← 一轮请求</a><a href="03-kv-cache.html"><small>下一章</small>KV 分页与地址映射 →</a></nav><footer>依据本地工作区生成 · 3988556e7965 · <a href="source/manifest.json">源码版本清单</a> · <a href="source/LICENSE.txt">源码 MIT 许可</a></footer></main></div></body></html>

@@ -4,7 +4,7 @@
 <title>03 / KV 到底存在哪里 · nano-vLLM 学习手册</title><link rel="stylesheet" href="style.css"><script defer src="app.js"></script></head>
 <body><a class="skip-link" href="#main">跳到正文</a>
 <div class="book"><aside class="sidebar"><a class="brand" href="index.html"><span class="brand-mark">n.</span><span>nano-vLLM<small>源码学习手册</small></span></a>
-<div class="edition">本地源码 · 677ba52</div><nav class="chapters" aria-label="学习章节"><a href="index.html" ><span>00</span>阅读路线</a><a href="01-request.html" ><span>01</span>一轮请求</a><a href="02-scheduler.html" ><span>02</span>调度与分块 Prefill</a><a href="03-kv-cache.html" aria-current="page"><span>03</span>KV 分页与地址映射</a><a href="04-prefix.html" ><span>04</span>前缀复用与回收</a><a href="05-attention.html" ><span>05</span>从块表到 Attention</a><a href="06-execution.html" ><span>06</span>CUDA Graph 与编译</a><a href="07-parallel.html" ><span>07</span>多 GPU 与进程通信</a><a href="08-practice.html" ><span>08</span>动手实验与验收</a><a href="09-reference.html" ><span>09</span>术语与功能地图</a></nav>
+<div class="edition">本地源码 · 3988556</div><nav class="chapters" aria-label="学习章节"><a href="index.html" ><span>00</span>阅读路线</a><a href="01-request.html" ><span>01</span>一轮请求</a><a href="02-scheduler.html" ><span>02</span>调度与分块 Prefill</a><a href="03-kv-cache.html" aria-current="page"><span>03</span>KV 分页与地址映射</a><a href="04-prefix.html" ><span>04</span>前缀复用与回收</a><a href="05-attention.html" ><span>05</span>从块表到 Attention</a><a href="06-execution.html" ><span>06</span>CUDA Graph 与编译</a><a href="07-parallel.html" ><span>07</span>多 GPU 与进程通信</a><a href="08-practice.html" ><span>08</span>动手实验与验收</a><a href="09-reference.html" ><span>09</span>术语与功能地图</a></nav>
 <div class="sidebar-note">先读通一个请求，<br>再理解每一项优化。</div></aside>
 <main id="main" class=""><header class="page-header"><span class="eyebrow">NANO-VLLM / 从请求到 GPU</span><h1>03 / KV 到底存在哪里</h1><p class="lead">阅读 allocate_kv_cache()、BlockManager 和 block_table。把一块显存与一个 Python 对象分清。</p></header>
 <article>
@@ -12,7 +12,7 @@
 <div class="table-wrap"><table><thead><tr><th scope="col">所在位置</th><th scope="col">数据结构</th><th scope="col">保存内容</th></tr></thead><tbody><tr><td>GPU</td><td>ModelRunner.kv_cache</td><td>每层的 K/V 浮点向量，推理启动时预分配。</td></tr><tr><td>CPU</td><td>Block / BlockManager</td><td>块编号、引用计数、哈希、token IDs、空闲队列。</td></tr><tr><td>CPU → GPU</td><td>Sequence.block_table</td><td>先在 CPU 管理，再转为 GPU Tensor，告诉 Attention 去哪里读。</td></tr></tbody></table></div>
 <figure class="code-box"><figcaption>缓存池的维度（单 GPU；每层拿到自己的视图）</figcaption><pre><code>kv_cache.shape = [2, num_layers, num_blocks, block_size, num_kv_heads, head_dim]</code></pre></figure>
 <p><code>2</code> 分别代表 K 和 V。一个管理块号在每一层对应各自的一块 K 和一块 V。默认 <code>block_size=256</code>；多 GPU 时 <code>num_kv_heads</code> 是这张卡负责的 KV 头数。</p>
-<p><a class="source-link" href="source/nanovllm__engine__model_runner.html#L103">ModelRunner.allocate_kv_cache <span>↗ L103</span></a> · <a class="source-link" href="source/nanovllm__config.html#L7">Config <span>↗ L7</span></a></p>
+<p><a class="source-link" href="source/nanovllm__engine__model_runner.html#L125">ModelRunner.allocate_kv_cache <span>↗ L125</span></a> · <a class="source-link" href="source/nanovllm__config.html#L7">Config <span>↗ L7</span></a></p>
 <h2>显存池一次申请，请求按块领取</h2>
 <p>先加载权重和预热，再根据总显存、显存利用预算、当前占用与预热峰值估算可分配块数，最后调用 <code>torch.empty(...)</code>。请求到达时领块；生成跨越块边界时，再从原池里领块。</p>
 <figure class="code-box"><figcaption>容量估算；“一个位置”包含多个头的向量，不是一个浮点数</figcaption><pre><code>每块字节数 = 2 × 层数 × block_size × 每卡 KV 头数 × head_dim × 每个元素字节数
@@ -25,11 +25,12 @@
 offset = p % block_size
 physical_block = block_table[logical_block]
 slot = physical_block * block_size + offset</code></pre></figure>
-<p><a class="source-link" href="source/nanovllm__engine__model_runner.html#L172">ModelRunner.prepare_decode <span>↗ L172</span></a> · <a class="source-link" href="source/nanovllm__engine__sequence.html#L56">Sequence.num_blocks <span>↗ L56</span></a></p>
+<p><a class="source-link" href="source/nanovllm__engine__model_runner.html#L212">ModelRunner.prepare_decode <span>↗ L212</span></a> · <a class="source-link" href="source/nanovllm__engine__sequence.html#L68">Sequence.num_blocks <span>↗ L68</span></a></p>
 <h2>为什么 may_append() 判断余数等于 1</h2>
 <p>假设已经算好了 256 个 token 的 KV，然后采样出了第 257 个 token。此时 <code>len(seq)=257</code>，旧块已满；下一轮要处理这个新 token，因此在 <code>257 % 256 == 1</code> 时申请下一块。判断的是<strong>已经包含上轮采样结果</strong>的序列长度。</p>
-<figure class="code-box"><figcaption><a class="source-link" href="source/nanovllm__engine__block_manager.html#L106">BlockManager.may_append <span>↗ L106</span></a></figcaption><pre><code>def may_append(self, seq: Sequence):
+<figure class="code-box"><figcaption><a class="source-link" href="source/nanovllm__engine__block_manager.html#L136">BlockManager.may_append <span>↗ L136</span></a></figcaption><pre><code>def may_append(self, seq: Sequence):
+    &quot;&quot;&quot;跨到新块时补一块。判断的是已经含上轮采样结果的长度。&quot;&quot;&quot;
     if len(seq) % self.block_size == 1:
         seq.block_table.append(self._allocate_block())</code></pre></figure>
 <details class="checkpoint"><summary>自检 · 600 token 需要 3 块，剩余 168 个位置能给另一个请求吗？</summary><div><p>当前实现按整块分配。末块仍归这个请求，其他请求不能领取其中的 168 个位置。这是末块内部未使用空间；它与池中完全空闲的块不同。</p></div></details>
-</article><nav class="pager" aria-label="章节翻页"><a href="02-scheduler.html"><small>上一章</small>← 调度与分块 Prefill</a><a href="04-prefix.html"><small>下一章</small>前缀复用与回收 →</a></nav><footer>依据本地工作区生成 · 677ba52023a0 · <a href="source/manifest.json">源码版本清单</a> · <a href="source/LICENSE.txt">源码 MIT 许可</a></footer></main></div></body></html>
+</article><nav class="pager" aria-label="章节翻页"><a href="02-scheduler.html"><small>上一章</small>← 调度与分块 Prefill</a><a href="04-prefix.html"><small>下一章</small>前缀复用与回收 →</a></nav><footer>依据本地工作区生成 · 3988556e7965 · <a href="source/manifest.json">源码版本清单</a> · <a href="source/LICENSE.txt">源码 MIT 许可</a></footer></main></div></body></html>

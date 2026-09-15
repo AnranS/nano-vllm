@@ -10,7 +10,7 @@
 
 A lightweight vLLM implementation built from scratch.
 
-📖 **[中文源码学习手册 · 在线阅读](https://anrans.github.io/nano-vllm/)** — 请求流程、调度、KV Cache、前缀复用与 GPU 执行。
+📖 **[中文源码学习手册 · 在线阅读](https://anrans.github.io/nano-vllm/)** — 请求流程、调度、KV Cache、前缀复用与 GPU 执行。本 fork 的 `nanovllm/` 源码带逐段中文注释，可与手册对照阅读。
 
 ## Key Features
 

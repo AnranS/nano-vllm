@@ -4,14 +4,20 @@ import torch
 
 @dataclass(slots=True)
 class Context:
+    """本轮前向的批次元信息：谁在哪、读多长、写哪里。
+
+    Attention 需要这些索引，但它们和模型结构无关。用一个进程级全局变量传递，
+    就不必让每一层的 forward 都多带一串参数。每个 rank 是独立进程，互不干扰；
+    ModelRunner 在前向前 set_context，前向后 reset_context。
+    """
     is_prefill: bool = False
-    cu_seqlens_q: torch.Tensor | None = None
-    cu_seqlens_k: torch.Tensor | None = None
+    cu_seqlens_q: torch.Tensor | None = None    # prefill：各序列 Q 的边界前缀和
+    cu_seqlens_k: torch.Tensor | None = None    # prefill：各序列 K 的边界前缀和
     max_seqlen_q: int = 0
     max_seqlen_k: int = 0
-    slot_mapping: torch.Tensor | None = None
-    context_lens: torch.Tensor | None = None
-    block_tables: torch.Tensor | None = None
+    slot_mapping: torch.Tensor | None = None    # 本轮每个 token 的 K/V 写到池里哪个槽
+    context_lens: torch.Tensor | None = None    # decode：各序列的有效上下文长度
+    block_tables: torch.Tensor | None = None    # 逻辑块 → 物理块，供 Attention 读历史 KV
 
 _CONTEXT = Context()
 
@@ -23,5 +29,6 @@ def set_context(is_prefill, cu_seqlens_q=None, cu_seqlens_k=None, max_seqlen_q=0
     _CONTEXT = Context(is_prefill, cu_seqlens_q, cu_seqlens_k, max_seqlen_q, max_seqlen_k, slot_mapping, context_lens, block_tables)
 
 def reset_context():
+    """前向结束就清空，顺便断开对本轮 GPU 张量的引用。"""
     global _CONTEXT
     _CONTEXT = Context()

@@ -27,13 +27,40 @@ def chapter(file, label, title, desc, body):
 
 def chapters(c):
     pages = []
+    route = table(['章节', '主要源码', '读完应该能回答'], [
+        ('01 一轮请求', c.ref(E + 'llm_engine.py', 'LLMEngine.step') + ' · ' + c.ref(E + 'sequence.py', 'Sequence'),
+         '一次 step() 里依次发生了什么；三个 token 计数分别在哪一步变化。'),
+        ('02 调度', c.ref(E + 'scheduler.py', 'Scheduler.schedule'),
+         '本轮为什么选中这批请求；600 token 的 Prompt 会被拆成几轮。'),
+        ('03 KV 分页', c.ref(E + 'block_manager.py', 'BlockManager') + ' · ' + c.ref(E + 'model_runner.py', 'ModelRunner.allocate_kv_cache'),
+         '池子有多大是谁算出来的；逻辑位置 p 怎么变成池里的 slot。'),
+        ('04 前缀复用', c.ref(E + 'block_manager.py', 'BlockManager.compute_hash') + ' · ' + c.ref(E + 'block_manager.py', 'BlockManager.can_allocate'),
+         '为什么已经空闲的块还能被命中；为什么最后一个块不参与复用。'),
+        ('05 Attention', c.ref(L + 'attention.py', 'Attention.forward') + ' · ' + c.ref(E + 'model_runner.py', 'ModelRunner.prepare_prefill'),
+         'slot_mapping 和 block_tables 各自管什么；Q 和 K 的长度为什么会不同。'),
+        ('06 执行优化', c.ref(E + 'model_runner.py', 'ModelRunner.run_model') + ' · ' + c.ref(E + 'model_runner.py', 'ModelRunner.capture_cudagraph'),
+         '图重放省掉的到底是哪一部分开销；什么情况下会退回 eager。'),
+        ('07 多 GPU', c.ref(L + 'linear.py', 'RowParallelLinear') + ' · ' + c.ref(E + 'model_runner.py', 'ModelRunner.write_shm'),
+         '哪些数据走 CPU 共享内存，哪些走 NCCL；为什么 bias 只在 rank0 加。'),
+        ('08 动手', c.ref(E + 'block_manager.py', 'BlockManager.may_append'),
+         '不靠 GPU，自己造出一次抢占和一次前缀命中。'),
+    ])
     pages.append(chapter('index.html', '阅读路线', '从一个请求读懂 nano-vLLM', '先串起单 GPU 的一次生成，再逐步补上缓存、调度与执行优化。每章只解决一个问题。', f'''
 <div class="takeaway"><strong>第一阶段的目标</strong><p>能解释：两个长度不同的请求怎么一起生成；其中一个结束后，另一个为什么还能继续；它们的 KV 存在什么地方。</p></div>
 <h2>先建立这一条主线</h2>
 {flow([('LLMEngine','串起每一轮执行',''),('Scheduler','选请求、安排 token、分块',''),('ModelRunner','准备输入、调用 GPU','gpu'),('postprocess','更新状态，回收请求','')])}
 <p>CPU 管理请求、块号与执行顺序；GPU 保存权重和 KV 向量，完成张量运算。<code>ModelRunner</code> 本身仍是 CPU 上执行的 Python 对象。</p>
+<h2>源码本身就是教材</h2>
+<p><code>nanovllm/</code> 一共约 1400 行，每个文件都写了逐段中文注释：类和方法说明它负责什么，行内注释解释那些"为什么要这么写"的地方——比如为什么 <code>can_append()</code> 判断余数等于 1，为什么捕获 CUDA Graph 要从最大档倒着来。</p>
+<p>所以每章的读法是固定的两步：<strong>先读正文建立框架，再点开"查看源码"链接，顺着注释把这一段代码走一遍。</strong>快照页面带真实行号，点行号可直接定位并分享位置。只读正文不看代码，很容易停留在"大概知道"；只读代码不看正文，又容易在细节里迷路。</p>
+<h2>按章推进：读什么，读完能答什么</h2>
+{route}
 <h2>推荐的阅读节奏</h2>
 <ol class="path-list"><li><strong>第一遍 · 01—03</strong><small>请求主循环 → 调度器 → KV 分页。先能手算状态，不追 CUDA 内核。</small></li><li><strong>第二遍 · 04—05</strong><small>前缀命中 → K/V 写入 → Attention 读取。把 CPU 块表和 GPU 数据接起来。</small></li><li><strong>第三遍 · 06—07</strong><small>CUDA Graph / 编译 → 多 GPU 张量并行与通信。理解每项优化减少什么开销。</small></li><li><strong>读完就做 · 08</strong><small>运行 CPU 小实验，验证分配、复用、回收和分块调度。</small></li></ol>
+<h2>两种读法，按目的选</h2>
+<div class="columns"><div><h3>只想读懂机制</h3><p class="small">按 01 → 08 顺序读正文，每章配着注释过一遍源码。章末自检能答上来就继续，答不上来就回到那一节。</p><p class="small">可以先跳过的：Triton kernel 的内部索引、flash-attn 的内部实现、CUDA Graph 的捕获机制。知道它们"负责什么"就够，第一遍不必知道"怎么做到的"。</p></div><div><h3>想动手改代码</h3><p class="small">先跑通 <code>example.py</code>，再用"改一处、看什么变化"的方式读。几个适合练手的改动：</p><ul class="small"><li>把 <code>kvcache_block_size</code> 从 256 调到 512，看块数和前缀命中率怎么变。</li><li>把 <code>max_num_batched_tokens</code> 调小，观察分块 Prefill 多出几轮。</li><li>在 <code>schedule()</code> 里打印本轮 batch，构造一次抢占。</li><li>给 <code>SamplingParams</code> 加 top-k，改 {c.ref(L+'sampler.py','Sampler.forward')}。</li></ul></div></div>
+<h2>读不下去的时候</h2>
+<div class="note amber"><p><strong>数字对不上</strong>，九成是把"已经采样出来的 token"和"已经算过 KV 的 token"当成了一回事。回到 01 章那张手推表，逐行对 <code>num_tokens</code> 和 <code>num_cached_tokens</code>。</p><p><strong>被"块"绕晕</strong>，说明逻辑块、物理块号、槽位三个概念混在了一起。回到 03 章的地址公式，拿具体数字走一遍。</p><p><strong>GPU 部分读不动</strong>，先运行 08 章的 CPU 实验。它跑的是本仓库真实的 Sequence、BlockManager 和 Scheduler，不需要显卡，能把调度和缓存这条线单独跑通。</p></div>
 <h2>只需要这些前置知识</h2>
 <p>认识 Python 类、列表、字典和队列；知道 Transformer 从输入计算 Q/K/V，再预测下一个 token；理解 Prefill 处理输入、Decode 逐轮生成。遇到术语时查最后一章，不必先学完整套 CUDA。</p>
 <h2>本书对应哪个版本</h2>
@@ -188,7 +215,26 @@ def chapters(c):
 {checkpoint('公共前缀会不会每次复制一份 KV？','命中后，块表直接引用同一缓存块并增加引用计数。其余未命中部分单独分配。')}
 {checkpoint('Python 调度变快，是否必然同等比例加速推理？','不会。整体收益取决于 CPU 调度是否限制 GPU 工作，以及计算、显存读写、通信各占多少时间。先定位瓶颈，再判断优化对象。')}
 '''))
+    filemap = table(['源码文件', '负责什么', '去哪一章'], [
+        ('<code>engine/llm_engine.py</code>', '引擎入口，串起每一轮 schedule → run → postprocess。', '<a href="01-request.html">01</a>'),
+        ('<code>engine/sequence.py</code>', '单条请求的状态账本，也定义了跨进程传输时带哪些字段。', '<a href="01-request.html">01</a> · <a href="07-parallel.html">07</a>'),
+        ('<code>engine/scheduler.py</code>', '选请求、切 token 预算、块不够时抢占。', '<a href="02-scheduler.html">02</a>'),
+        ('<code>engine/block_manager.py</code>', '块池、链式前缀哈希、引用计数与回收。', '<a href="03-kv-cache.html">03</a> · <a href="04-prefix.html">04</a>'),
+        ('<code>engine/model_runner.py</code>', '显存预算、输入张量准备、图重放、多卡命令通道。', '<a href="03-kv-cache.html">03</a> · <a href="05-attention.html">05</a> · <a href="06-execution.html">06</a> · <a href="07-parallel.html">07</a>'),
+        ('<code>layers/attention.py</code>', 'Triton 写 KV 的 kernel，以及按阶段挑 flash-attn 内核。', '<a href="05-attention.html">05</a>'),
+        ('<code>layers/linear.py</code>', '四种并行线性层，以及权重怎么切给各张卡。', '<a href="07-parallel.html">07</a>'),
+        ('<code>layers/embed_head.py</code>', '词表按卡切分的嵌入层与输出头。', '<a href="07-parallel.html">07</a>'),
+        ('<code>layers/layernorm.py</code> · <code>rotary_embedding.py</code> · <code>activation.py</code> · <code>sampler.py</code>', '被 <code>@torch.compile</code> 覆盖的小算子。', '<a href="06-execution.html">06</a>'),
+        ('<code>models/qwen3.py</code>', '模型结构本身，把上面这些层拼成 decoder。', '<a href="05-attention.html">05</a>'),
+        ('<code>utils/context.py</code>', '本轮批次元信息的全局载体，替代逐层透传参数。', '<a href="05-attention.html">05</a>'),
+        ('<code>utils/loader.py</code>', 'safetensors 权重按名字路由到各个分片。', '<a href="07-parallel.html">07</a>'),
+        ('<code>config.py</code> · <code>sampling_params.py</code>', '引擎旋钮与采样参数，兼作组件间的共享白板。', '<a href="03-kv-cache.html">03</a> · <a href="06-execution.html">06</a>'),
+        ('<code>example.py</code> · <code>bench.py</code>', '最小可跑示例与吞吐压测脚本。', '<a href="08-practice.html">08</a>'),
+    ])
     pages.append(chapter('09-reference.html', '术语与功能地图', '09 / 随用随查的源码地图', '忘记一个名词时回来查。先读主线，不必一次记住整张表。', f'''
+<h2>源码文件 → 该读哪一章</h2>
+<p>盯着某个文件不知道从哪切入时查这张表。这些文件都带逐段中文注释，正文讲清"为什么这么设计"，注释补上"这一行在干什么"。</p>
+{filemap}
 <h2>功能 → 源码</h2>
 {table(['功能','本地入口','范围'], [('请求循环',c.ref(E+'llm_engine.py','LLMEngine.step'),'同步离线生成，迭代推进请求。'),('连续批处理 / 分块 Prefill',c.ref(E+'scheduler.py','Scheduler.schedule'),'Prefill 优先，当前不混合 Prefill 与 Decode。'),('分页 KV / 前缀复用',c.ref(E+'block_manager.py','BlockManager'),'块池、链式哈希、引用计数。'),('分页 Attention',c.ref(L+'attention.py','Attention.forward'),'调用 flash-attn 的缓存与块表接口。'),('CUDA Graph',c.ref(E+'model_runner.py','ModelRunner.capture_cudagraph'),'捕获模型主干，主要用于 Decode。'),('局部编译',c.ref(L+'layernorm.py','RMSNorm'),'RMSNorm、RoPE、激活函数、采样等。'),('张量并行',c.ref(L+'linear.py','RowParallelLinear'),'单机多 GPU 分片与集体通信。'),('CPU 进程通信',c.ref(E+'model_runner.py','ModelRunner.write_shm'),'共享内存 + Event + pickle。'),('模型结构',c.ref('nanovllm/models/qwen3.py','Qwen3ForCausalLM'),'当前执行器直接使用 Qwen3 路径。'),('采样',c.ref('nanovllm/sampling_params.py','SamplingParams'),'温度、生成长度、EOS；没有完整 top-k/top-p 参数。')])}
 <h2>容易混淆的名词</h2>
